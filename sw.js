@@ -1,10 +1,10 @@
 // Offline support: the app shell is cached on install; card images are cached as you see them.
 // Bump VERSION (and APP_VERSION in js/devfixes.js) when you change any app file so phones pick up the update.
-const VERSION = 'v1';
+const VERSION = 'v2';
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png',
   'js/app.js', 'js/util.js', 'js/cards.js', 'js/engine.js', 'js/ai.js', 'js/deckparse.js', 'js/carddb.js', 'js/storage.js',
-  'js/devfixes.js', 'js/rulefixes.js', 'js/data/demo.js', 'js/ui/dom.js', 'js/ui/board.js', 'js/ui/devui.js', 'js/ui/explain.js',
+  'js/devfixes.js', 'js/rulefixes.js', 'js/data/demo.js', 'js/data/starters.js', 'js/ui/dom.js', 'js/ui/board.js', 'js/ui/devui.js', 'js/ui/explain.js',
 ];
 const IMG = 'img-v1';
 const MAX_IMAGES = 2000;

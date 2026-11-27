@@ -4,6 +4,7 @@ import { parseText, makeDef } from '../js/cards.js';
 import { parseDeckText, checkDeck, splitDeck } from '../js/deckparse.js';
 import { DEMO_CARDS, DEMO_DECKS } from '../js/data/demo.js';
 import { fromApi } from '../js/carddb.js';
+import { STARTER_DECKS } from '../js/data/starters.js';
 import { AIController } from '../js/ai.js';
 import { setPreviewFix } from '../js/devfixes.js';
 import { newGame, place, defOf, demoDeck, card } from './helpers.mjs';
@@ -136,6 +137,19 @@ await test('rule fixes: sentence-level and whole-ability replacements', () => {
   p = parseText(ab);
   assert.equal(p.abilities[0].event, 'suspended'); assert.deepEqual(p.abilities[0].unhandled, []);
   setPreviewFix(null);
+});
+
+await test('official starter decks: 54 cards (4 eggs + 50), max 4 copies, card numbers only', () => {
+  const keys = new Set();
+  for (const d of STARTER_DECKS) {
+    assert.ok(!keys.has(d.key), d.key); keys.add(d.key);
+    const p = parseDeckText(d.text);
+    assert.deepEqual(p.errors, [], d.code); assert.deepEqual(p.named, [], d.code);
+    assert.equal(p.cards.reduce((s, c) => s + c.qty, 0), 54, d.code);
+    for (const c of p.cards) assert.ok(c.qty <= 4, `${d.code} ${c.id}`);
+    const prefix = d.code.replace('-', '');
+    assert.equal(p.cards.find((c) => c.id === `${prefix}-01`)?.qty, 4, `${d.code}: 4 Digi-Eggs`);
+  }
 });
 
 console.log(`\n${pass} passed, ${fail} failed`);

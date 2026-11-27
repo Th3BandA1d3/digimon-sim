@@ -5,6 +5,7 @@ import { parseDeckText, splitDeck, checkDeck, deckToText } from './deckparse.js'
 import { getCards } from './carddb.js';
 import { makeDef } from './cards.js';
 import { DEMO_CARDS, DEMO_DECKS } from './data/demo.js';
+import { STARTER_DECKS } from './data/starters.js';
 import { Game } from './engine.js';
 import { AIController, GoldfishController } from './ai.js';
 import { GameView, HumanController, cardFace, cardDetails } from './ui/board.js';
@@ -19,17 +20,35 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.se
 
 // ---------- decks: saved + demo ----------
 function allDeckChoices() {
-  return [...listDecks().map((d) => ({ key: d.id, title: d.title, saved: true })), ...DEMO_DECKS.map((d) => ({ key: d.key, title: d.title, demo: true }))];
+  return [...listDecks().map((d) => ({ key: d.id, title: d.title, saved: true, group: 'My decks' })),
+    ...STARTER_DECKS.map((d) => ({ key: d.key, title: d.title, group: 'Official starter decks' })),
+    ...DEMO_DECKS.map((d) => ({ key: d.key, title: d.title, demo: true, group: 'Demo decks (offline)' }))];
+}
+// <option>s grouped by My decks / Official starter decks / Demo decks.
+function deckOptions(choices, sel) {
+  const groups = new Map(); for (const c of choices) { if (!groups.has(c.group)) groups.set(c.group, []); groups.get(c.group).push(c); }
+  return [...groups].map(([g, list]) => `<optgroup label="${h(g)}">${list.map((c) => `<option value="${h(c.key)}" ${sel === c.key ? 'selected' : ''}>${h(c.title)}</option>`).join('')}</optgroup>`).join('');
+}
+// Official starter decks: card numbers only. Digi-Eggs are sorted out once the cards are looked up (sortEggs).
+function starterAsDeck(key) {
+  const d = STARTER_DECKS.find((x) => x.key === key);
+  return { id: key, title: d.title, main: parseDeckText(d.text).cards.map((e) => ({ id: e.id, qty: e.qty, name: e.id })), eggs: [], starter: true, blurb: d.blurb };
+}
+function sortEggs(deck, cards) {
+  const isEgg = (e) => cards.get(e.id)?.type === 'Digi-Egg';
+  const named = (e) => ({ ...e, name: cards.get(e.id)?.name || e.name });
+  return { ...deck, main: deck.main.filter((e) => !isEgg(e)).map(named), eggs: [...deck.eggs, ...deck.main.filter(isEgg)].map(named) };
 }
 function demoAsDeck(key) {
   const d = DEMO_DECKS.find((x) => x.key === key);
   const s = splitDeck(parseDeckText(d.text).cards, new Map(Object.entries(DEMO_CARDS)));
   return { id: key, title: d.title, main: s.main, eggs: s.eggs };
 }
-const deckByKey = (k) => getDeck(k) || (DEMO_DECKS.some((d) => d.key === k) ? demoAsDeck(k) : null);
+const deckByKey = (k) => getDeck(k) || (DEMO_DECKS.some((d) => d.key === k) ? demoAsDeck(k) : STARTER_DECKS.some((d) => d.key === k) ? starterAsDeck(k) : null);
 async function loadDefs(deck, onProgress) {
   const ids = [...deck.main, ...deck.eggs].map((e) => e.id);
   const cards = await getCards(ids, onProgress);
+  deck = sortEggs(deck, cards);
   const defs = new Map(); const missing = [];
   for (const id of new Set(ids)) { const c = cards.get(id); if (c) defs.set(id, makeDef(c)); else missing.push(id); }
   // Dev: collect every piece of text the game can't do yet, so it shows up in Dev → Found right away.
@@ -59,14 +78,14 @@ screens.home = () => {
 screens.play = (pre = {}) => {
   const choices = allDeckChoices();
   const st = { mine: pre.mine || choices[0]?.key, theirs: pre.theirs || 'random', level: pre.level || 'normal', first: 'random' };
-  const opt = (sel) => choices.map((c) => `<option value="${h(c.key)}" ${sel === c.key ? 'selected' : ''}>${h(c.title)}</option>`).join('');
+  const opt = (sel) => deckOptions(choices, sel);
   app.innerHTML = `<div class="screen"><div class="bar"><button class="icon" data-k="back">←</button><h2>New game</h2><span></span></div>
     <label class="field">Your deck<select name="mine">${opt(st.mine)}</select></label>
     <label class="field">Opponent's deck<select name="theirs"><option value="random">Random demo deck</option>${opt(st.theirs)}<option value="fish">Goldfish (does nothing)</option></select></label>
     <label class="field">Opponent<select name="level"><option value="normal">Normal AI</option><option value="easy">Easy AI</option></select></label>
     <label class="field">Who goes first<select name="first"><option value="random">Random</option><option value="me">Me</option><option value="them">Opponent</option></select></label>
     <div class="acts"><button class="btn big go" data-k="start">Start</button></div>
-    <p class="hint">Import your own decks under My decks. The demo decks use invented practice cards and work offline.</p></div>`;
+    <p class="hint">Import your own decks under My decks. Official starter decks load their cards from DigimonCard.io (online the first time, then saved on this device). The demo decks use invented practice cards and work offline.</p></div>`;
   app.onclick = async (e) => {
     const k = e.target.closest('[data-k]')?.dataset.k;
     if (k === 'back') return go('home');
@@ -112,7 +131,7 @@ async function startGame(cfg) {
 // ---------- watch ----------
 screens.watch = () => {
   const choices = allDeckChoices();
-  const opt = (sel) => choices.map((c) => `<option value="${h(c.key)}" ${sel === c.key ? 'selected' : ''}>${h(c.title)}</option>`).join('');
+  const opt = (sel) => deckOptions(choices, sel);
   app.innerHTML = `<div class="screen"><div class="bar"><button class="icon" data-k="back">←</button><h2>Watch</h2><span></span></div>
     <p class="hint">Two AIs play each other. Pause any time, step through one move at a time with Next, and see a match summary at the end.</p>
     <label class="field">Bottom player<select name="a">${opt('demo-red')}</select></label>
@@ -144,7 +163,8 @@ screens.decks = () => {
   app.innerHTML = `<div class="screen"><div class="bar"><button class="icon" data-k="back">←</button><h2>My decks</h2><span></span></div>
     <div class="acts"><button class="btn go" data-k="import">+ Import a deck</button></div>
     <ul class="decklist">${decks.map((d) => `<li data-d="${h(d.id)}"><b>${h(d.title)}</b><small>${d.main.reduce((s, e) => s + e.qty, 0)} cards + ${d.eggs.reduce((s, e) => s + e.qty, 0)} eggs</small></li>`).join('') || '<p class="hint">No decks yet. Import one from a deck list (card numbers like BT1-010 work best).</p>'}
-    ${DEMO_DECKS.map((d) => `<li data-d="${h(d.key)}"><b>${h(d.title)}</b><small>${h(d.blurb)}</small></li>`).join('')}</ul></div>`;
+    </ul><h4>Official starter decks</h4><ul class="decklist">${STARTER_DECKS.map((d) => `<li data-d="${h(d.key)}"><b>${h(d.title)}</b><small>${h(d.colors)} · ${h(d.blurb)}</small></li>`).join('')}</ul>
+    <h4>Demo decks (offline)</h4><ul class="decklist">${DEMO_DECKS.map((d) => `<li data-d="${h(d.key)}"><b>${h(d.title)}</b><small>${h(d.blurb)}</small></li>`).join('')}</ul></div>`;
   app.onclick = (e) => {
     const k = e.target.closest('[data-k]')?.dataset.k;
     if (k === 'back') return go('home');
@@ -185,18 +205,23 @@ function guessTitle(split, cards) {
   return top ? `${top.name} deck` : 'My deck';
 }
 screens.deck = async (key) => {
-  const deck = deckByKey(key); if (!deck) return go('decks');
+  let deck = deckByKey(key); if (!deck) return go('decks');
   const isDemo = !getDeck(key);
   app.innerHTML = `<div class="screen"><div class="bar"><button class="icon" data-k="back">←</button><h2>${h(deck.title)}</h2><span></span></div><p class="hint">Loading cards…</p></div>`;
   let cards;
   try { cards = await getCards([...deck.main, ...deck.eggs].map((e) => e.id)); } catch { cards = new Map(); }
+  if (deck.starter) {
+    if (!cards.size) { app.innerHTML = `<div class="screen"><div class="bar"><button class="icon" data-k="back">←</button><h2>${h(deck.title)}</h2><span></span></div><p class="warnline">Couldn't load this deck's cards — check your connection and try again.</p></div>`; app.onclick = (e) => { if (e.target.closest('[data-k=back]')) go('decks'); }; return; }
+    deck = sortEggs(deck, cards);
+  }
   const warns = [...checkDeck(deck), ...(deck.notes || [])];
   const group = (label, list) => (list.length ? `<h4>${label} (${list.reduce((s, e) => s + e.qty, 0)})</h4><div class="cardrow wrap">${list.map((e) => { const c = cards.get(e.id); return c ? `<button class="card dk" data-id="${h(e.id)}">${cardFace(makeDef(c), { small: true })}<i class="qty">×${e.qty}</i></button>` : `<div class="card missing">${h(e.name || e.id)} ×${e.qty}</div>`; }).join('')}</div>` : '');
   const byType = (t) => deck.main.filter((e) => cards.get(e.id)?.type === t);
   const lv = (n) => deck.main.filter((e) => cards.get(e.id)?.type === 'Digimon' && (cards.get(e.id).level || 0) === n);
   const manual = new Set(); for (const e of [...deck.main, ...deck.eggs]) { const c = cards.get(e.id); if (c && makeDef(c).manual.length) manual.add(c.name); }
   app.innerHTML = `<div class="screen"><div class="bar"><button class="icon" data-k="back">←</button><h2>${h(deck.title)}</h2><span></span></div>
-    <div class="acts"><button class="btn go" data-k="play">▶ Play with this deck</button><button class="btn ghost" data-k="export">Export</button>${isDemo ? '' : '<button class="btn ghost" data-k="rename">Rename</button><button class="btn ghost danger" data-k="del">Delete</button>'}</div>
+    <div class="acts"><button class="btn go" data-k="play">▶ Play with this deck</button><button class="btn ghost" data-k="export">Export</button>${deck.starter ? '<button class="btn ghost" data-k="copy">Save a copy</button>' : ''}${isDemo ? '' : '<button class="btn ghost" data-k="rename">Rename</button><button class="btn ghost danger" data-k="del">Delete</button>'}</div>
+    ${deck.blurb ? `<p class="hint">${h(deck.blurb)}</p>` : ''}
     ${warns.length ? `<ul class="warns">${warns.map((w) => `<li>${h(w)}</li>`).join('')}</ul>` : ''}
     ${manual.size ? `<p class="hint">${manual.size} card${manual.size > 1 ? 's have' : ' has'} text the game can't do by itself yet (shown as a manual step in play): ${h([...manual].slice(0, 8).join(', '))}${manual.size > 8 ? '…' : ''}</p>` : '<p class="hint ok">Every card in this deck is automated.</p>'}
     ${group('Digi-Eggs', deck.eggs)}${[3, 4, 5, 6, 7].map((n) => group(`Level ${n}`, lv(n))).join('')}${group('Tamers', byType('Tamer'))}${group('Options', byType('Option'))}</div>`;
@@ -205,6 +230,7 @@ screens.deck = async (key) => {
     if (k === 'back') return go('decks');
     if (k === 'play') return go('play', { mine: key });
     if (k === 'export') { const t = deckToText(deck); try { await navigator.clipboard.writeText(t); toast('Deck list copied'); } catch { download(`${deck.title}.txt`, t); } return; }
+    if (k === 'copy') { const copy = saveDeck({ title: deck.title.replace(/^ST-\d+: /, '') + ' (my copy)', main: deck.main, eggs: deck.eggs, notes: [] }); toast('Saved to My decks — edit it from there'); return go('deck', copy.id); }
     if (k === 'rename') { const n = prompt('Deck name', deck.title); if (n) { deck.title = n; saveDeck(deck); go('deck', key); } return; }
     if (k === 'del') { if (confirm(`Delete ${deck.title}?`)) { deleteDeck(key); go('decks'); } return; }
     const c = e.target.closest('[data-id]'); if (c) sheet(cardDetails(makeDef(cards.get(c.dataset.id))), { tall: true });

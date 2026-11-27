@@ -13,6 +13,8 @@ It runs in the browser and installs on a phone (Add to Home Screen). Built on th
   (`["BT1-001", "BT1-010", …]`). Cards are looked up by card number on DigimonCard.io and cached on the device;
   Digi-Eggs go to the egg deck automatically. The deck page shows legality notes and which cards have text the game
   can't do by itself yet.
+- **Official starter decks:** ST-1 to ST-10, ST-12 to ST-21 and ST-23, ready to play or watch (card numbers only;
+  cards load from DigimonCard.io). "Save a copy" puts one in My decks to edit.
 - **Learn:** a short how-to-play and practice games with two demo decks.
 - **Rules engine:** memory gauge and turn passing, breeding area (hatch / move), digivolving (colour + level, cost,
   draw 1, inherited effects), attacking players or suspended Digimon, blocking, security checks and security battles,
