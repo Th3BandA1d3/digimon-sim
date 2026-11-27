@@ -2,7 +2,7 @@
 // builder, and sending a fix to Claude as a GitHub issue. Safe to import in Node (no DOM).
 import { SHIPPED_FIXES } from './rulefixes.js';
 
-export const APP_VERSION = 'v2'; // keep in step with VERSION in sw.js
+export const APP_VERSION = 'v3'; // keep in step with VERSION in sw.js
 export const REPO = 'Th3BandA1d3/digimon-sim';
 const FIXES = 'digisim.dev.fixes.v1';
 const FOUND = 'digisim.dev.found.v1';

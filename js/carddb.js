@@ -12,18 +12,28 @@ const mem = new Map();
 let dbp = null;
 function db() {
   if (typeof indexedDB === 'undefined') return Promise.resolve(null);
-  if (!dbp) dbp = new Promise((res) => { const r = indexedDB.open(DB, 1); r.onupgradeneeded = () => r.result.createObjectStore(STORE); r.onsuccess = () => res(r.result); r.onerror = () => res(null); });
+  // Some phones (private mode, low storage) never answer the open request: give up after 2 s and use memory only.
+  if (!dbp) dbp = new Promise((res) => {
+    const t = setTimeout(() => res(null), 2000);
+    try {
+      const r = indexedDB.open(DB, 1);
+      r.onupgradeneeded = () => r.result.createObjectStore(STORE);
+      r.onsuccess = () => { clearTimeout(t); res(r.result); }; r.onerror = r.onblocked = () => { clearTimeout(t); res(null); };
+    } catch { clearTimeout(t); res(null); }
+  });
   return dbp;
 }
 async function cacheGet(id) {
   if (mem.has(id)) return mem.get(id);
   const d = await db(); if (!d) return null;
-  return new Promise((res) => { const q = d.transaction(STORE).objectStore(STORE).get(id); q.onsuccess = () => { const v = q.result; if (v && v.f === FORMAT) { mem.set(id, v.c); res(v.c); } else res(null); }; q.onerror = () => res(null); });
+  return new Promise((res) => {
+    try { const q = d.transaction(STORE).objectStore(STORE).get(id); q.onsuccess = () => { const v = q.result; if (v && v.f === FORMAT) { mem.set(id, v.c); res(v.c); } else res(null); }; q.onerror = () => res(null); } catch { res(null); }
+  });
 }
 async function cachePut(card) {
   mem.set(card.id, card);
   const d = await db(); if (!d) return;
-  d.transaction(STORE, 'readwrite').objectStore(STORE).put({ f: FORMAT, c: card, t: Date.now() }, card.id);
+  try { d.transaction(STORE, 'readwrite').objectStore(STORE).put({ f: FORMAT, c: card, t: Date.now() }, card.id); } catch { /* memory cache still has it */ }
 }
 
 // ---------- API → app card ----------
@@ -48,19 +58,31 @@ function dedupeEvo(list) { const seen = new Set(); return list.filter((e) => { c
 
 let lastCall = 0;
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
-async function apiGet(params) {
+// One API call: spaced ~0.8 s apart, 15 s time limit, at most 3 waits on "too many requests". Errors say what happened.
+export class LookupError extends Error {}
+async function apiGet(params, tries = 0) {
   const wait = lastCall + 800 - Date.now(); if (wait > 0) await pause(wait);
   lastCall = Date.now();
   const url = `${API}?${new URLSearchParams({ series: 'Digimon Card Game', ...params })}`;
-  const r = await fetch(url);
-  if (r.status === 400) return [];
-  if (r.status === 429) { await pause(5000); return apiGet(params); }
-  if (!r.ok) throw new Error(`Card lookup failed (${r.status})`);
-  const j = await r.json();
+  const ctl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = setTimeout(() => ctl?.abort(), 15000);
+  let r;
+  try { r = await fetch(url, ctl ? { signal: ctl.signal } : undefined); }
+  catch (e) { throw new LookupError(e?.name === 'AbortError' ? 'DigimonCard.io took too long to answer.' : "Couldn't reach DigimonCard.io (offline, or the site is down)."); }
+  finally { clearTimeout(timer); }
+  if (r.status === 400 || r.status === 404) return []; // "No cards found for this search."
+  if (r.status === 429) {
+    if (tries >= 3) throw new LookupError('DigimonCard.io says too many requests — wait a few minutes and try again.');
+    await pause(5000 * (tries + 1)); return apiGet(params, tries + 1);
+  }
+  if (!r.ok) throw new LookupError(`DigimonCard.io lookup failed (error ${r.status}).`);
+  let j; try { j = await r.json(); } catch { throw new LookupError('DigimonCard.io sent back something unexpected.'); }
   return Array.isArray(j) ? j : [];
 }
+const rowId = (row) => String(row.id || row.cardnumber || row.card_number || '').toUpperCase();
 
 // Look up cards by number (e.g. "BT1-010"). Returns Map id → card; missing ids are left out.
+// Asks for up to 25 numbers per call; anything a batch didn't return is retried one card at a time.
 export async function getCards(ids, onProgress) {
   const want = [...new Set(ids.map((x) => String(x).toUpperCase().trim()).filter(Boolean))];
   const out = new Map(); const need = [];
@@ -68,14 +90,23 @@ export async function getCards(ids, onProgress) {
     const demo = DEMO_CARDS[id]; if (demo) { out.set(id, demo); continue; }
     const c = await cacheGet(id); if (c) out.set(id, c); else need.push(id);
   }
+  const keep = async (rows, allowed) => {
+    for (const row of rows) {
+      const id = rowId(row);
+      if (!allowed.includes(id) || out.has(id)) continue; // the API can return alternate printings; keep the first
+      const c = fromApi(row); c.id = id; out.set(id, c); await cachePut(c);
+    }
+  };
   for (let i = 0; i < need.length; i += 25) {
     const batch = need.slice(i, i + 25);
-    onProgress?.(`Looking up cards ${i + 1}–${Math.min(need.length, i + batch.length)} of ${need.length}…`);
-    const rows = await apiGet({ card: batch.join(',') });
-    for (const row of rows) {
-      const c = fromApi(row); const id = String(c.id).toUpperCase();
-      if (!batch.includes(id) || out.has(id)) continue; // the API can return alternate printings; keep the first
-      out.set(id, c); await cachePut(c);
+    onProgress?.(`Looking up cards ${i + 1}–${i + batch.length} of ${need.length}…`);
+    await keep(await apiGet({ card: batch.join(',') }), batch);
+  }
+  const left = need.filter((id) => !out.has(id));
+  if (left.length) {
+    for (let i = 0; i < left.length; i++) {
+      onProgress?.(`Looking up ${left[i]} (${i + 1} of ${left.length})…`);
+      await keep(await apiGet({ card: left[i] }), [left[i]]);
     }
   }
   return out;

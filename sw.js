@@ -1,6 +1,6 @@
 // Offline support: the app shell is cached on install; card images are cached as you see them.
 // Bump VERSION (and APP_VERSION in js/devfixes.js) when you change any app file so phones pick up the update.
-const VERSION = 'v2';
+const VERSION = 'v3';
 const SHELL = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest', 'icon.svg', 'icon-192.png', 'icon-512.png',
   'js/app.js', 'js/util.js', 'js/cards.js', 'js/engine.js', 'js/ai.js', 'js/deckparse.js', 'js/carddb.js', 'js/storage.js',

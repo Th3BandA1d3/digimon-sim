@@ -207,13 +207,21 @@ function guessTitle(split, cards) {
 screens.deck = async (key) => {
   let deck = deckByKey(key); if (!deck) return go('decks');
   const isDemo = !getDeck(key);
-  app.innerHTML = `<div class="screen"><div class="bar"><button class="icon" data-k="back">←</button><h2>${h(deck.title)}</h2><span></span></div><p class="hint">Loading cards…</p></div>`;
-  let cards;
-  try { cards = await getCards([...deck.main, ...deck.eggs].map((e) => e.id)); } catch { cards = new Map(); }
-  if (deck.starter) {
-    if (!cards.size) { app.innerHTML = `<div class="screen"><div class="bar"><button class="icon" data-k="back">←</button><h2>${h(deck.title)}</h2><span></span></div><p class="warnline">Couldn't load this deck's cards — check your connection and try again.</p></div>`; app.onclick = (e) => { if (e.target.closest('[data-k=back]')) go('decks'); }; return; }
-    deck = sortEggs(deck, cards);
+  const head = `<div class="bar"><button class="icon" data-k="back">←</button><h2>${h(deck.title)}</h2><span></span></div>`;
+  app.innerHTML = `<div class="screen">${head}<p class="hint prog">Loading cards…</p></div>`;
+  app.onclick = (e) => { if (e.target.closest('[data-k=back]')) go('decks'); };
+  let cards; let err = '';
+  try { cards = await getCards([...deck.main, ...deck.eggs].map((e) => e.id), (m) => { const el = $('.prog', app); if (el) el.textContent = m; }); }
+  catch (e) { cards = new Map(); err = e.message || 'Card lookup failed.'; }
+  if (!cards.size && (deck.main.length || deck.eggs.length) && !deck.main.every((e) => DEMO_CARDS[e.id])) {
+    app.innerHTML = `<div class="screen">${head}<p class="warnline">${h(err || "DigimonCard.io didn't return any of these cards.")}</p>
+      <div class="acts"><button class="btn go" data-k="retry">Try again</button></div>
+      <p class="hint">Cards are saved on this device once they load, so this is only needed the first time.</p></div>`;
+    app.onclick = (e) => { const k = e.target.closest('[data-k]')?.dataset.k; if (k === 'back') go('decks'); if (k === 'retry') go('deck', key); };
+    return;
   }
+  if (deck.starter) deck = sortEggs(deck, cards);
+  if (err) toast(err, 5000);
   const warns = [...checkDeck(deck), ...(deck.notes || [])];
   const group = (label, list) => (list.length ? `<h4>${label} (${list.reduce((s, e) => s + e.qty, 0)})</h4><div class="cardrow wrap">${list.map((e) => { const c = cards.get(e.id); return c ? `<button class="card dk" data-id="${h(e.id)}">${cardFace(makeDef(c), { small: true })}<i class="qty">×${e.qty}</i></button>` : `<div class="card missing">${h(e.name || e.id)} ×${e.qty}</div>`; }).join('')}</div>` : '');
   const byType = (t) => deck.main.filter((e) => cards.get(e.id)?.type === t);
